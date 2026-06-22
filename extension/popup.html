@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Review Analyzer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+
+  <body>
+    <main class="app">
+      <header>
+        <h1>Review Analyzer</h1>
+        <p>Analyze visible reviews on this page.</p>
+      </header>
+
+      <button id="analyzeBtn" type="button">
+        Analyze Reviews
+      </button>
+
+      <section id="loading" class="hidden">
+        <div class="spinner"></div>
+        <p>Analyzing reviews via AI model...</p>
+      </section>
+
+      <section id="errorBox" class="error hidden"></section>
+
+      <section id="results" class="hidden">
+        <div class="metric-grid">
+          <div class="metric-card">
+            <span class="metric-label">Reviews</span>
+            <strong id="totalReviews">0</strong>
+          </div>
+
+          <div class="metric-card">
+            <span class="metric-label">Positive</span>
+            <strong id="positivePct">0%</strong>
+          </div>
+
+          <div class="metric-card">
+            <span class="metric-label">Negative</span>
+            <strong id="negativePct">0%</strong>
+          </div>
+        </div>
+
+        <div class="chart">
+          <div class="chart-row">
+            <span>Positive</span>
+            <div class="bar-track">
+              <div id="positiveBar" class="bar positive"></div>
+            </div>
+          </div>
+
+          <div class="chart-row">
+            <span>Negative</span>
+            <div class="bar-track">
+              <div id="negativeBar" class="bar negative"></div>
+            </div>
+          </div>
+        </div>
+
+        <section>
+          <h2>AI Summary</h2>
+          <p id="summaryText"></p>
+        </section>
+
+        <section>
+          <h2>Common Issue Terms</h2>
+          <ul id="keywordList"></ul>
+        </section>
+      </section>
+    </main>
+
+    <script src="popup.js"></script>
+  </body>
+</html>
