@@ -1,88 +1,33 @@
-# =========================
 # Environment variables
-# =========================
 .env
 .env.*
 !.env.example
 
-# =========================
-# Python virtual environments
-# =========================
-.venv/
-venv/
-env/
-ENV/
+# Dependencies
+node_modules/
+extension/node_modules/
 
-# =========================
-# Python cache / build files
-# =========================
-__pycache__/
-*.py[cod]
-*$py.class
-
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.coverage
-htmlcov/
-
-build/
+# Extension build/package output
 dist/
-*.egg-info/
-.eggs/
-
-# =========================
-# FastAPI / backend runtime files
-# =========================
-*.log
-logs/
-*.sqlite3
-*.db
-
-# =========================
-# Hugging Face / ML cache
-# Only needed if cache folders accidentally get created inside your project
-# =========================
-.cache/
-huggingface/
-models/
-model_cache/
-
-# =========================
-# Chrome extension packaged outputs
-# =========================
+extension/dist/
+extension-build/
+extension-dist/
+extension/.vite/
 *.crx
 *.pem
 *.zip
-extension-build/
-extension-dist/
 
-# =========================
-# Node files
-# Not required for your current vanilla JS setup,
-# but useful if you later add tooling
-# =========================
-node_modules/
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# =========================
-# OS files
-# =========================
+# OS/editor files
 .DS_Store
 Thumbs.db
-
-# =========================
-# Editor files
-# =========================
 .vscode/
 .idea/
 *.swp
 *.swo
-
-# =========================
-# Render / deployment local files
-# =========================
-.render/
