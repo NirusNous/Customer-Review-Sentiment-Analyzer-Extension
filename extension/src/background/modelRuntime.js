@@ -16,6 +16,8 @@ import {
 import { isDegenerateGeneratedText } from "../localRag/responseGuards.js";
 import { buildReviewRagMessages } from "../prompts/reviewRagPrompts.js";
 
+import { generateWithCloudApi } from "./cloudApi.js";
+
 const runtimeState = {
   initializedAt: null,
   webgpuAvailable: Boolean(globalThis.navigator?.gpu),
@@ -144,12 +146,14 @@ export async function classifySentiment(texts) {
 
 export async function streamGenerationToPort(port, message) {
   const requestId = message.requestId || crypto.randomUUID();
-  const generator = await getPipeline(MODEL_ROLES.GENERATOR);
-  const generationState = {
-    cancelled: false,
-    errorSent: false,
-    stoppingCriteria: new InterruptableStoppingCriteria(),
-  };
+
+  // Check if we have cloud API credentials
+  const storageResult = await new Promise(resolve => {
+    chrome.storage.local.get(["aiProvider", "aiApiKey", "aiBaseUrl", "aiModelName"], resolve);
+  });
+  const { aiProvider, aiApiKey, aiBaseUrl, aiModelName } = storageResult;
+  const isCloud = Boolean(aiProvider && aiProvider !== "local" && aiApiKey);
+
   const prompt = buildReviewRagMessages({
     context: message.context || "No review context available.",
     recentChat: message.recentChat || "No previous chat history.",
@@ -157,13 +161,26 @@ export async function streamGenerationToPort(port, message) {
     sessionAnalytics: message.sessionAnalytics || "No session analytics available.",
     answerStyle: message.answerStyle || "Answer briefly in natural language.",
     userQuery: message.query || "",
+    isCloud,
   });
 
   safePostMessage(port, {
     type: "START",
     requestId,
-    model: MODEL_CONFIG[MODEL_ROLES.GENERATOR].model,
+    model: MODEL_CONFIG[MODEL_ROLES.GENERATOR].model, // Defaults, will be ignored by cloud APIs
   });
+
+  if (isCloud) {
+    return generateWithCloudApi(prompt, port, requestId, aiProvider, aiApiKey, aiModelName, aiBaseUrl);
+  }
+
+  // Fallback to local execution
+  const generator = await getPipeline(MODEL_ROLES.GENERATOR);
+  const generationState = {
+    cancelled: false,
+    errorSent: false,
+    stoppingCriteria: new InterruptableStoppingCriteria(),
+  };
 
   runtimeState.activeGenerations.set(requestId, generationState);
   const cancelOnDisconnect = () => {
