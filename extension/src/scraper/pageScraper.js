@@ -408,6 +408,36 @@ export function scrapeReviewsFromPage(limit) {
       Array.from(document.querySelectorAll(selector)).forEach(addContainer);
     }
 
+    // Heuristic for arbitrary divs: Find elements that look like ratings
+    // and try using their parent containers as review containers.
+    const ratingSelectors = [
+      "[itemprop='ratingValue']",
+      "[data-hook='review-star-rating']",
+      "[data-hook='cmps-review-star-rating']",
+      "[aria-label*='star' i]",
+      "[aria-label*='rating' i]",
+      "[title*='star' i]",
+      "[title*='rating' i]",
+      "[class*='rating' i]",
+      "[class*='star' i]",
+      "._3LWZlK",
+      ".XQDdHH"
+    ];
+
+    for (const selector of ratingSelectors) {
+      Array.from(document.querySelectorAll(selector)).forEach((ratingEl) => {
+        let container = ratingEl.parentElement;
+        // Go up a few levels to find a container with enough text
+        for (let i = 0; i < 5 && container; i++) {
+          if (container.innerText && container.innerText.length > 50) {
+            addContainer(container);
+            // Don't break immediately, let addContainer handle nesting/duplicates
+          }
+          container = container.parentElement;
+        }
+      });
+    }
+
     return containers;
   }
 

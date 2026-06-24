@@ -15,48 +15,72 @@ import {
 } from "../constants/ragConfig.js";
 import { isDegenerateGeneratedText } from "../localRag/responseGuards.js";
 import { buildReviewRagMessages } from "../prompts/reviewRagPrompts.js";
+import { generateWithCloudApi, embedWithCloudApi, classifySentimentWithCloudApi } from "./cloudApi.js";
+
+// We run CPU models in the service worker, so we skip local/remote checks.
+// But we still don't use the cache that might be broken.
+if ("useBrowserCache" in env) {
+  env.useBrowserCache = true;
+}
+
+if ("useFSCache" in env) {
+  env.useFSCache = false;
+}
+
+if ("useCustomCache" in env) {
+  env.useCustomCache = false;
+}
+
+// We cannot use webgpu in the service worker context
+if (env.backends?.onnx?.wasm) {
+  env.backends.onnx.wasm.proxy = false;
+}
 
 const runtimeState = {
   initializedAt: null,
-  webgpuAvailable: Boolean(globalThis.navigator?.gpu),
+  webgpuAvailable: false, // Force false for service worker
   pipelines: new Map(),
   loadingPromises: new Map(),
   activeGenerations: new Map(),
 };
 
 export function configureTransformersEnvironment() {
-  env.allowRemoteModels = true;
-  env.allowLocalModels = false;
-
-  if ("useBrowserCache" in env) {
-    env.useBrowserCache = true;
-  }
-
-  if ("useFSCache" in env) {
-    env.useFSCache = false;
-  }
-
-  if ("useCustomCache" in env) {
-    env.useCustomCache = false;
-  }
-
-  if (env.backends?.onnx?.wasm) {
-    env.backends.onnx.wasm.proxy = false;
-  }
+  // Configured at module scope
 }
 
 export async function markExtensionInstalled() {
-  await writeModelCacheRecord("extension", {
-    status: "installed",
-    installedAt: new Date().toISOString(),
-    cacheMode: "browser-indexeddb",
+  // Initialization hook for cache setup
+}
+
+async function getCloudCredentials() {
+  const storageResult = await new Promise(resolve => {
+    chrome.storage.local.get(["aiProvider", "aiApiKey", "aiBaseUrl", "aiModelName"], resolve);
   });
+  const { aiProvider, aiApiKey, aiBaseUrl, aiModelName } = storageResult;
+  const isCloud = Boolean(aiProvider && aiProvider !== "local" && aiApiKey);
+  return { isCloud, aiProvider, aiApiKey, aiBaseUrl, aiModelName };
 }
 
 export async function initModels(roles = [
   MODEL_ROLES.EMBEDDING,
   MODEL_ROLES.SENTIMENT,
 ]) {
+  const { isCloud } = await getCloudCredentials();
+  
+  if (isCloud) {
+    // Skip loading local models if using cloud
+    runtimeState.initializedAt = new Date().toISOString();
+    return {
+      ok: true,
+      initializedAt: runtimeState.initializedAt,
+      webgpuAvailable: false,
+      models: {
+        [MODEL_ROLES.EMBEDDING]: { ok: true, config: { model: "cloud" } },
+        [MODEL_ROLES.SENTIMENT]: { ok: true, config: { model: "cloud" } },
+      },
+    };
+  }
+
   const requestedRoles = normalizeRoles(roles);
   const results = {};
 
@@ -81,7 +105,7 @@ export async function initModels(roles = [
   return {
     ok: true,
     initializedAt: runtimeState.initializedAt,
-    webgpuAvailable: runtimeState.webgpuAvailable,
+    webgpuAvailable: false,
     models: results,
   };
 }
@@ -92,7 +116,7 @@ export async function getModelStatus() {
   return {
     ok: true,
     initializedAt: runtimeState.initializedAt,
-    webgpuAvailable: runtimeState.webgpuAvailable,
+    webgpuAvailable: false,
     loadedRoles: Array.from(runtimeState.pipelines.keys()),
     loadingRoles: Array.from(runtimeState.loadingPromises.keys()),
     cache: records,
@@ -103,9 +127,17 @@ export async function embedTexts(texts) {
   const cleanTexts = normalizeTexts(texts);
 
   if (!cleanTexts.length) {
+    return { ok: true, embeddings: [] };
+  }
+
+  const { isCloud, aiProvider, aiApiKey, aiBaseUrl } = await getCloudCredentials();
+  
+  if (isCloud) {
+    const embeddings = await embedWithCloudApi(cleanTexts, aiProvider, aiApiKey, aiBaseUrl);
     return {
       ok: true,
-      embeddings: [],
+      model: "cloud",
+      embeddings,
     };
   }
 
@@ -126,9 +158,17 @@ export async function classifySentiment(texts) {
   const cleanTexts = normalizeTexts(texts);
 
   if (!cleanTexts.length) {
+    return { ok: true, results: [] };
+  }
+
+  const { isCloud, aiProvider, aiApiKey, aiBaseUrl, aiModelName } = await getCloudCredentials();
+  
+  if (isCloud) {
+    const results = await classifySentimentWithCloudApi(cleanTexts, aiProvider, aiApiKey, aiModelName, aiBaseUrl);
     return {
       ok: true,
-      results: [],
+      model: "cloud",
+      results,
     };
   }
 
@@ -144,12 +184,28 @@ export async function classifySentiment(texts) {
 
 export async function streamGenerationToPort(port, message) {
   const requestId = message.requestId || crypto.randomUUID();
-  const generator = await getPipeline(MODEL_ROLES.GENERATOR);
-  const generationState = {
-    cancelled: false,
-    errorSent: false,
-    stoppingCriteria: new InterruptableStoppingCriteria(),
-  };
+
+  const { isCloud, aiProvider, aiApiKey, aiBaseUrl, aiModelName } = await getCloudCredentials();
+
+  if (isCloud) {
+    const prompt = buildReviewRagMessages({
+      context: message.context || "No review context available.",
+      recentChat: message.recentChat || "No previous chat history.",
+      conversationSummary: message.conversationSummary || "No earlier conversation summary.",
+      sessionAnalytics: message.sessionAnalytics || "No session analytics available.",
+      answerStyle: message.answerStyle || "Answer briefly in natural language.",
+      userQuery: message.query || "",
+      isCloud,
+    });
+    
+    safePostMessage(port, {
+      type: "START",
+      requestId,
+      model: "cloud",
+    });
+    return generateWithCloudApi(prompt, port, requestId, aiProvider, aiApiKey, aiModelName, aiBaseUrl);
+  }
+
   const prompt = buildReviewRagMessages({
     context: message.context || "No review context available.",
     recentChat: message.recentChat || "No previous chat history.",
@@ -157,13 +213,15 @@ export async function streamGenerationToPort(port, message) {
     sessionAnalytics: message.sessionAnalytics || "No session analytics available.",
     answerStyle: message.answerStyle || "Answer briefly in natural language.",
     userQuery: message.query || "",
+    isCloud: false,
   });
 
-  safePostMessage(port, {
-    type: "START",
-    requestId,
-    model: MODEL_CONFIG[MODEL_ROLES.GENERATOR].model,
-  });
+  const generator = await getPipeline(MODEL_ROLES.GENERATOR);
+  const generationState = {
+    cancelled: false,
+    errorSent: false,
+    stoppingCriteria: new InterruptableStoppingCriteria(),
+  };
 
   runtimeState.activeGenerations.set(requestId, generationState);
   const cancelOnDisconnect = () => {
@@ -228,6 +286,12 @@ export async function streamGenerationToPort(port, message) {
         requestId,
       });
     }
+  } catch (error) {
+    safePostMessage(port, {
+      type: "ERROR",
+      requestId,
+      error: error.message,
+    });
   } finally {
     runtimeState.activeGenerations.delete(requestId);
     port.onDisconnect.removeListener(cancelOnDisconnect);
@@ -286,7 +350,7 @@ async function loadPipeline(role) {
 
     throw new Error(
       "WebGPU is not available in this extension service worker context. " +
-      "Run generation from an offscreen document or dedicated worker.",
+      "Run generation from an offscreen document or dedicated worker."
     );
   }
 

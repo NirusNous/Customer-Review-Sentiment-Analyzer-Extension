@@ -122,7 +122,8 @@ export function createReviewChunks(reviews, sessionId) {
       return;
     }
 
-    const words = cleanText.split(/\s+/).filter(Boolean);
+    // A simple sentence splitter by punctuation
+    const sentences = cleanText.split(/(?<=[.?!])\s+/).filter(Boolean);
     const reviewId = review.id || `${sessionId}-review-${reviewIndex + 1}`;
     const metadata = {
       review_index: Number.isInteger(review.original_index) ? review.original_index : reviewIndex,
@@ -145,42 +146,44 @@ export function createReviewChunks(reviews, sessionId) {
       date: review.date ?? null,
     };
 
-    if (words.length <= CHUNK_WORD_LIMIT) {
-      chunks.push({
-        id: `${reviewId}-chunk-1`,
-        sessionId,
-        reviewId,
-        chunkIndex: 0,
-        text: cleanText,
-        metadata,
-      });
-      return;
+    let currentChunkSentences = [];
+    let currentWordCount = 0;
+    let chunkIndex = 0;
+
+    for (let i = 0; i < sentences.length; i++) {
+      const sentence = sentences[i];
+      const wordCount = sentence.split(/\s+/).filter(Boolean).length;
+
+      if (currentWordCount + wordCount > CHUNK_WORD_LIMIT && currentChunkSentences.length > 0) {
+        // Push the current chunk
+        chunks.push({
+          id: `${reviewId}-chunk-${chunkIndex + 1}`,
+          sessionId,
+          reviewId,
+          chunkIndex,
+          text: currentChunkSentences.join(" "),
+          metadata,
+        });
+        chunkIndex += 1;
+        // Keep the last sentence as overlap
+        const lastSentence = currentChunkSentences[currentChunkSentences.length - 1];
+        currentChunkSentences = [lastSentence, sentence];
+        currentWordCount = lastSentence.split(/\s+/).filter(Boolean).length + wordCount;
+      } else {
+        currentChunkSentences.push(sentence);
+        currentWordCount += wordCount;
+      }
     }
 
-    let chunkIndex = 0;
-    const step = CHUNK_WORD_LIMIT - CHUNK_OVERLAP;
-
-    for (let start = 0; start < words.length; start += step) {
-      const chunkWords = words.slice(start, start + CHUNK_WORD_LIMIT);
-
-      if (!chunkWords.length) {
-        break;
-      }
-
+    if (currentChunkSentences.length > 0) {
       chunks.push({
         id: `${reviewId}-chunk-${chunkIndex + 1}`,
         sessionId,
         reviewId,
         chunkIndex,
-        text: chunkWords.join(" "),
+        text: currentChunkSentences.join(" "),
         metadata,
       });
-
-      chunkIndex += 1;
-
-      if (start + CHUNK_WORD_LIMIT >= words.length) {
-        break;
-      }
     }
   });
 

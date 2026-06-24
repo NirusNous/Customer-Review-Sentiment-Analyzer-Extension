@@ -35,7 +35,9 @@ export default function App() {
   const [isChatBusy, setIsChatBusy] = React.useState(false);
   const chatMessagesRef = React.useRef(null);
   const activeGenerationRef = React.useRef(null);
-  const hasSession = Boolean(sessionId);
+  const [pendingReviews, setPendingReviews] = React.useState(null);
+  const [selectedReviewCount, setSelectedReviewCount] = React.useState(0);
+  const [activeTab, setActiveTab] = React.useState(null);
 
   React.useEffect(() => {
     const chatMessages = chatMessagesRef.current;
@@ -57,6 +59,7 @@ export default function App() {
     setIndexingStatus("Reading visible reviews from the current tab...");
     setError("");
     setEmptyState(false);
+    setPendingReviews(null);
 
     try {
       if (shouldRefresh && sessionId) {
@@ -74,6 +77,8 @@ export default function App() {
         throw new Error("No active browser tab found.");
       }
 
+      setActiveTab(tab);
+
       const injectionResults = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: scrapeReviewsFromPage,
@@ -88,11 +93,36 @@ export default function App() {
 
       if (!reviews.length) {
         setEmptyState(true);
+        setIsIndexing(false);
+        setIndexingStatus("");
         return;
       }
 
-      const sessionData = await createLocalRagSession(tab, reviews, setIndexingStatus);
-      applySessionData(sessionData, Boolean(scrapeResult.hitLimit));
+      setPendingReviews({
+        reviews,
+        hitLimit: Boolean(scrapeResult.hitLimit)
+      });
+      setSelectedReviewCount(Math.min(reviews.length, 50)); // Default to 50 or max
+    } catch (caughtError) {
+      setError(caughtError.message || "Failed to read reviews.");
+    } finally {
+      setIsIndexing(false);
+      setIndexingStatus("");
+    }
+  }
+
+  async function handleProcessReviews() {
+    if (!pendingReviews || !activeTab) return;
+    
+    setIsIndexing(true);
+    setIndexingStatus("Building local review index...");
+    setError("");
+
+    try {
+      const slicedReviews = pendingReviews.reviews.slice(0, selectedReviewCount);
+      const sessionData = await createLocalRagSession(activeTab, slicedReviews, setIndexingStatus);
+      applySessionData(sessionData, pendingReviews.hitLimit);
+      setPendingReviews(null);
     } catch (caughtError) {
       setError(caughtError.message || "Failed to create local RAG session.");
     } finally {
@@ -253,6 +283,8 @@ export default function App() {
     )));
   }
 
+  const hasSession = Boolean(sessionId);
+
   function resetSessionState() {
     setSessionId(null);
     setSessionMeta(null);
@@ -298,7 +330,7 @@ export default function App() {
         <button
           type="button"
           onClick={() => createOrRefreshSession(false)}
-          disabled={isIndexing}
+          disabled={isIndexing || pendingReviews}
           className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg bg-accent px-3 py-2 text-[13px] font-bold text-primary shadow-bubble transition hover:bg-primary-hover hover:text-white disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isIndexing ? <Loader2 className="animate-spin" size={16} /> : <Search size={16} />}
@@ -317,6 +349,33 @@ export default function App() {
         </button>
       </section>
 
+      {pendingReviews && (
+        <section className="mt-3 rounded-lg border border-primary/10 bg-white p-3 shadow-sm">
+          <h2 className="mb-2 text-sm font-bold text-primary">Found {pendingReviews.reviews.length} reviews</h2>
+          <p className="text-[13px] text-muted mb-3">How many do you want to process? Processing fewer reviews is faster.</p>
+          
+          <div className="flex items-center gap-3">
+            <input
+              type="range"
+              min="1"
+              max={pendingReviews.reviews.length}
+              value={selectedReviewCount}
+              onChange={(e) => setSelectedReviewCount(Number(e.target.value))}
+              className="flex-1"
+            />
+            <span className="font-bold text-sm w-8 text-right">{selectedReviewCount}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleProcessReviews}
+            className="mt-4 w-full rounded-lg bg-primary py-2 text-[13px] font-bold text-white transition hover:bg-primary-hover"
+          >
+            Process {selectedReviewCount} Reviews
+          </button>
+        </section>
+      )}
+
       {isIndexing && (
         <StatusPanel tone="loading" icon={<Loader2 className="animate-spin" size={18} />}>
           {indexingStatus || "Building local review index..."}
@@ -331,7 +390,7 @@ export default function App() {
 
       {emptyState && (
         <StatusPanel tone="warning" title="No review text found" icon={<AlertCircle size={18} />}>
-          Open a page where reviews or comments are visible, scroll them into view, then run the analyzer again.
+          could not find any text in this page
         </StatusPanel>
       )}
 

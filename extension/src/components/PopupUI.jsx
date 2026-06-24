@@ -56,14 +56,14 @@ export function SessionSummary({ sessionMeta }) {
       {isProgressive
         ? (
           <>
-            Indexed {sessionMeta.indexedReviewCount} of {sessionMeta.reviewCount} reviews into{" "}
-            {sessionMeta.chunkCount} chunks. {sessionMeta.backlogReviewCount} reviews will be indexed lazily.
+            Indexed {sessionMeta.indexedReviewCount} of {sessionMeta.reviewCount} reviews.{" "}
+            {sessionMeta.backlogReviewCount} reviews will be indexed lazily.
             {sessionMeta.unqueuedReviewCount > 0 && (
               <> {sessionMeta.unqueuedReviewCount} extra reviews were skipped to keep local storage responsive.</>
             )}
           </>
         )
-        : <>Indexed {sessionMeta.reviewCount} reviews into {sessionMeta.chunkCount} chunks.</>}
+        : <>Indexed {sessionMeta.reviewCount} reviews.</>}
     </StatusPanel>
   );
 }
